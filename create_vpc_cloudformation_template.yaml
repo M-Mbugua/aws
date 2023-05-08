@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: 2023-05-08
+Description: Test template
+
+# Test VPC with EC2 instance
+
+Parameters:
+
+  TestVpcCidr:
+    Type: String
+    Default: 10.0.0.0/20
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.0.0/24
+
+  AmazonLinuxAMIID:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      ImageId: !Ref AmazonLinuxAMIID
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref TestSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Test Server
+
+###########################
+# VPC with Internet Gateway
+###########################
+
+  TestVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref TestVpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Test VPC
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Test IGW
+
+  VPCtoIGWConnection:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn:
+      - IGW
+      - TestVPC
+    Properties:
+      InternetGatewayId: !Ref IGW
+      VpcId: !Ref TestVPC
+
+####################
+# Public Route Table
+####################
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: TestVPC
+    Properties:
+      VpcId: !Ref TestVPC
+      Tags:
+        - Key: Name
+          Value: Public Route Table
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - PublicRouteTable
+      - IGW
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+      RouteTableId: !Ref PublicRouteTable
+
+###############
+# Public Subnet
+###############
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: TestVPC
+    Properties:
+      VpcId: !Ref TestVPC
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs 
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: Public Subnet
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PublicRouteTable
+      - PublicSubnet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+
+#####################
+# Test Security Group
+#####################
+
+  TestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: TestVPC
+    Properties:
+      GroupName: Test
+      GroupDescription: Enable access to Test
+      VpcId: !Ref TestVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Test
+
+###########
+# Outputs
+###########
+
+Outputs:
+
+  TestVPCDefaultSecurityGroup:
+    Value: !Sub ${TestVPC.DefaultSecurityGroup}
